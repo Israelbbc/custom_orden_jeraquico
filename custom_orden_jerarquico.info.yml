@@ -1,0 +1,8 @@
+name: 'Custom Orden Jerárquico'
+type: module
+description: 'Calcula el campo computado para orden jerárquico en taxonomía.'
+core_version_requirement: ^10
+package: Custom
+dependencies:
+  - computed_field
+

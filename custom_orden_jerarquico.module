@@ -1,0 +1,99 @@
+<?php
+
+use Drupal\taxonomy\Entity\Term;
+
+/**
+ * Computed field para 'field_orden_jerarquico'.
+ */
+function computed_field_field_orden_jerarquico_compute($entity_type_manager, $entity, $fields, $delta) {
+  static $index_cache = NULL;
+
+  /*\Drupal::logger('orden_jerarquico')->notice('== INICIO: Computando campo Orden Jerárquico ==');*/
+
+  // Solo aplicamos para términos de la taxonomía 'naturaleza'
+  if ($entity->getEntityTypeId() === 'taxonomy_term' && $entity->bundle() === 'naturaleza') {
+    if ($index_cache === NULL) {
+      // Construye el árbol completo al primer término que entre
+      $index_cache = build_taxonomy_index_hierarchy('naturaleza');
+    }
+
+    $tid = $entity->id();
+    $value = isset($index_cache[$tid]) ? $index_cache[$tid] : '';
+
+    /*\Drupal::logger('orden_jerarquico')->notice("Campo computado: {$value}");
+     *\Drupal::logger('orden_jerarquico')->notice('== FIN: Computo de campo Orden Jerárquico ==');*/
+
+    return $value;
+  }
+
+  return '';
+}
+
+/**
+ * Construye el índice jerárquico para todos los términos de una taxonomía.
+ */
+function build_taxonomy_index_hierarchy($vocabulary) {
+  $tree = [];
+  $tids = [];
+
+  // 1. Cargar todos los términos ordenados por peso y nombre
+  $terms = \Drupal::entityTypeManager()
+    ->getStorage('taxonomy_term')
+    ->loadByProperties(['vid' => $vocabulary]);
+
+  $terms = array_values($terms);
+
+  usort($terms, function ($a, $b) {
+    // Orden por peso y luego nombre
+    $cmp = $a->getWeight() <=> $b->getWeight();
+    if ($cmp === 0) {
+      return strcasecmp($a->label(), $b->label());
+    }
+    return $cmp;
+  });
+
+  // 2. Agrupar por padres
+  $children_map = [];
+  foreach ($terms as $term) {
+    $parent_tid = $term->get('parent')->isEmpty() ? 0 : $term->get('parent')->target_id;
+    $children_map[$parent_tid][] = $term;
+  }
+
+  // 3. Recorrer jerárquicamente y construir índices tipo 1., 1.1., 1.1.1.
+  $output = [];
+
+  build_recursive_index($children_map, 0, '', $output);
+
+  return $output;
+}
+
+/**
+ * Función recursiva para construir el índice jerárquico.
+ */
+function build_recursive_index(array $children_map, $parent_tid = 0, $prefix = '', array &$output = [], $depth = 0) {
+  if (empty($children_map[$parent_tid])) {
+    return;
+  }
+
+  $counter = 1;
+  foreach ($children_map[$parent_tid] as $term) {
+    $tid = $term->id();
+
+    // Padding a dos dígitos, puedes cambiar a 3 si prefieres (e.g., '001').
+    $padded = str_pad((string) $counter, 2, '0', STR_PAD_LEFT);
+
+    // Construir el índice jerárquico
+    $index = $prefix ? $prefix . '.' . $padded : $padded;
+
+    // Asignar al arreglo de salida
+    $output[$tid] = $index . '. ' . $term->label();
+
+    // Logger para debug
+    /*\Drupal::logger('orden_jerarquico')->notice('Asignando índice: ' . $output[$tid]);*/
+
+    // Llamada recursiva para hijos
+    build_recursive_index($children_map, $tid, $index, $output, $depth + 1);
+
+    $counter++;
+  }
+}
